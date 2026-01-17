@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>LEGO Tetris 3D</title>
+<style>
+body{
+  margin:0;
+  background:linear-gradient(135deg,#fce38a,#f38181);
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+  font-family:Arial;
+}
+#container{
+  display:flex;
+  gap:30px;
+}
+.board{
+  text-align:center;
+}
+canvas{
+  background:#cce3ff;
+  border-radius:12px;
+  border:5px solid white;
+}
+h2{margin:5px;}
+#winner{
+  position:fixed;
+  top:0;left:0;
+  width:100%;height:100%;
+  background:rgba(0,0,0,0.8);
+  color:white;
+  display:none;
+  justify-content:center;
+  align-items:center;
+  flex-direction:column;
+  font-size:32px;
+}
+button{
+  margin-top:20px;
+  padding:12px 25px;
+  font-size:20px;
+  border:none;
+  border-radius:20px;
+  cursor:pointer;
+}
+</style>
+</head>
+<body>
+
+<div id="container">
+  <div class="board">
+    <h2>🤖 AI</h2>
+    <p>점수: <span id="scoreAI">0</span></p>
+    <canvas id="ai" width="300" height="600"></canvas>
+  </div>
+
+  <div class="board">
+    <h2>🧑 사람</h2>
+    <p>점수: <span id="scoreHuman">0</span></p>
+    <canvas id="human" width="300" height="600"></canvas>
+  </div>
+</div>
+
+<div id="winner">
+  <div id="winnerText"></div>
+  <button onclick="location.reload()">다시 하기</button>
+</div>
+
+<script>
+const COLS=10,ROWS=20,BLOCK=30,WIN_SCORE=1000;
+const COLORS=[null,"#ff6b6b","#4dabf7","#ffd43b","#69db7c","#b197fc"];
+
+const SHAPES=[
+ [[1,1,1,1]],
+ [[2,0,0],[2,2,2]],
+ [[0,3,3],[3,3,0]],
+ [[4,4],[4,4]],
+ [[0,5,0],[5,5,5]]
+];
+
+// 3D 느낌 블록 그리기
+function drawLego(ctx,x,y,color,angle=0){
+  const px=x*BLOCK, py=y*BLOCK;
+  const skew=BLOCK*0.2*Math.sin(angle);
+
+  // 몸체
+  ctx.fillStyle=color;
+  ctx.beginPath();
+  ctx.moveTo(px,py+skew);
+  ctx.lineTo(px+BLOCK,py);
+  ctx.lineTo(px+BLOCK,py+BLOCK-skew);
+  ctx.lineTo(px,py+BLOCK);
+  ctx.closePath();
+  ctx.fill();
+
+  // 하이라이트
+  ctx.fillStyle="rgba(255,255,255,0.3)";
+  ctx.beginPath();
+  ctx.moveTo(px,py+skew);
+  ctx.lineTo(px+BLOCK,py);
+  ctx.lineTo(px+BLOCK,py+BLOCK*0.25);
+  ctx.lineTo(px,py+BLOCK*0.25+skew);
+  ctx.closePath();
+  ctx.fill();
+
+  // 돌기
+  ctx.beginPath();
+  ctx.ellipse(px+BLOCK/2, py+BLOCK/2, BLOCK/6, BLOCK/6*0.7, angle,0,Math.PI*2);
+  ctx.fillStyle="rgba(255,255,255,0.4)";
+  ctx.fill();
+}
+
+// 게임 클래스
+function Game(canvas,scoreEl,isAI){
+  this.ctx=canvas.getContext("2d");
+  this.scoreEl=scoreEl;
+  this.isAI=isAI;
+  this.arena=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+  this.player={pos:{x:3,y:0},matrix:null};
+  this.score=0;
+  this.drop=0;
+  this.interval=1200;
+  this.angle=0; // 블록 회전 시각적 각도
+  this.newPiece();
+}
+
+Game.prototype.newPiece=function(){
+  this.player.matrix=SHAPES[Math.random()*SHAPES.length|0];
+  this.player.pos={x:3,y:0};
+};
+
+Game.prototype.collide=function(){
+  const m=this.player.matrix,o=this.player.pos;
+  for(let y=0;y<m.length;y++)
+    for(let x=0;x<m[y].length;x++)
+      if(m[y][x]&&(this.arena[y+o.y]?.[x+o.x])!==0)
+        return true;
+  return false;
+};
+
+Game.prototype.merge=function(){
+  this.player.matrix.forEach((r,y)=>r.forEach((v,x)=>{
+    if(v) this.arena[y+this.player.pos.y][x+this.player.pos.x]=v;
+  }));
+};
+
+Game.prototype.clear=function(){
+  for(let y=ROWS-1;y>=0;y--){
+    if(this.arena[y].every(v=>v)){
+      this.arena.splice(y,1);
+      this.arena.unshift(Array(COLS).fill(0));
+      this.score+=100;
+      this.scoreEl.textContent=this.score;
+      if(this.score>=WIN_SCORE) endGame(this.isAI?"AI":"사람");
+      y++;
+    }
+  }
+};
+
+Game.prototype.update=function(dt){
+  this.drop+=dt;
+  this.angle+=0.05; // 매 프레임 조금씩 회전
+  if(this.drop>this.interval){
+    this.player.pos.y++;
+    if(this.collide()){
+      this.player.pos.y--;
+      this.merge();
+      this.clear();
+      this.newPiece();
+    }
+    this.drop=0;
+  }
+
+  if(this.isAI){
+    if(Math.random()<0.03) this.player.pos.x++;
+    if(this.collide()) this.player.pos.x--;
+  }
+
+  this.ctx.clearRect(0,0,300,600);
+  // 배경
+  const bg=this.ctx.createLinearGradient(0,0,0,600);
+  bg.addColorStop(0,"#ffd6e0");
+  bg.addColorStop(1,"#cdb4db");
+  this.ctx.fillStyle=bg;
+  this.ctx.fillRect(0,0,300,600);
+
+  // arena 그리기
+  this.arena.forEach((r,y)=>r.forEach((v,x)=>{
+    if(v) drawLego(this.ctx,x,y,COLORS[v],this.angle);
+  }));
+  // player 그리기
+  this.player.matrix.forEach((r,y)=>r.forEach((v,x)=>{
+    if(v) drawLego(this.ctx,x+this.player.pos.x,y+this.player.pos.y,COLORS[v],this.angle);
+  }));
+};
+
+const aiGame=new Game(document.getElementById("ai"),document.getElementById("scoreAI"),true);
+const humanGame=new Game(document.getElementById("human"),document.getElementById("scoreHuman"),false);
+
+let last=0;
+function loop(t=0){
+  const dt=t-last; last=t;
+  aiGame.update(dt);
+  humanGame.update(dt);
+  requestAnimationFrame(loop);
+}
+loop();
+
+// 사람 플레이 키보드
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowLeft") humanGame.player.pos.x--;
+  if(e.key==="ArrowRight") humanGame.player.pos.x++;
+  if(e.key==="ArrowDown") humanGame.player.pos.y++;
+  if(humanGame.collide()){
+    if(e.key==="ArrowLeft") humanGame.player.pos.x++;
+    if(e.key==="ArrowRight") humanGame.player.pos.x--;
+    if(e.key==="ArrowDown") humanGame.player.pos.y--;
+  }
+});
+
+// 승리 표시
+function endGame(winner){
+  document.getElementById("winner").style.display="flex";
+  document.getElementById("winnerText").textContent=`🎉 ${winner} 승리!`;
+}
+</script>
+
+</body>
+</html>
